@@ -1536,6 +1536,15 @@ class NetCafeClient:
                 if response.status == 200:
                     data = await response.json()
                     if data.get('success'):
+                        # Проверка дали е админ
+                        user_role = data.get('user', {}).get('role')
+                        
+                        if user_role == 'admin':
+                            logger.info(f"🔑 Admin login detected: {username}")
+                            await self._admin_shutdown()
+                            return True
+                        
+                        # Нормален потребител
                         self.session_id = data.get('session_id')
                         minutes = data.get('minutes', 0)
                         
@@ -1573,6 +1582,54 @@ class NetCafeClient:
             QMessageBox.critical(None, '❌ Connection Error', f'Failed to connect to server: {str(e)}')
             return False
     
+    async def _admin_shutdown(self):
+        """Изключва клиента когато админ се логне"""
+        try:
+            logger.info("🔑 Admin login detected - shutting down client")
+            
+            # Премахни всички защити
+            self.keyboard_blocker.uninstall()
+            self.folder_blocker.uninstall()
+            
+            # Скрий прозорци
+            self.lock_screen.hide()
+            self.timer_overlay.hide()
+            
+            # Покажи съобщение
+            msg = QMessageBox()
+            msg.setWindowTitle('🔑 Admin Access')
+            msg.setText('Administrator login detected.\nClient shutting down...')
+            msg.setIcon(QMessageBox.Information)
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.setStyleSheet('''
+                QMessageBox {
+                    background: #1a1a2e;
+                    color: white;
+                }
+                QMessageBox QPushButton {
+                    background: #00A19C;
+                    color: black;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+            ''')
+            
+            # Показва съобщението за 2 секунди
+            QTimer.singleShot(2000, msg.accept)
+            msg.exec()
+            
+            # Cleanup и изключване
+            self._cleanup()
+            
+            # Изключи приложението
+            QTimer.singleShot(100, self.app.quit)
+            
+        except Exception as e:
+            logger.error(f"Admin shutdown error: {e}")
+            # Force quit дори при грешка
+            self.app.quit()
+
     async def start_session(self, minutes):
         try:
             logger.info(f"Starting session: {minutes} minutes")
