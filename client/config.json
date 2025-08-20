@@ -1,0 +1,9 @@
+{
+    "server": {
+        "host": "localhost",
+        "port": 8080,
+        "websocket_endpoint": "/ws",
+        "max_reconnect_attempts": 10,
+        "fallback_hosts": ["127.0.0.1"]
+    }
+}

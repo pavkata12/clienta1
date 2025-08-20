@@ -1541,12 +1541,19 @@ class NetCafeClient:
                     # Try authentication
                     auth_result = await self.authenticate(username, password)
                     if auth_result:
-                        # Check if it was admin login (client will be shutting down)
-                        # If admin logged in, _admin_shutdown was called and app is closing
-                        # Don't continue the login loop
-                        logger.info("🔑 Authentication successful - exiting login loop")
+                        # Normal user login successful - start session and exit
+                        logger.info("✅ Normal user authentication successful - exiting login loop")
                         return  # Exit the method completely
                     else:
+                        # Check if admin credentials were entered (even if auth_result is False)
+                        # This handles the case where admin login triggers shutdown
+                        if username.lower() in ['admin', 'administrator']:
+                            logger.info("🔑 Admin credentials detected - waiting for shutdown...")
+                            # Give time for admin shutdown to complete
+                            await asyncio.sleep(1.0)
+                            # If we're still here, it means shutdown didn't work or wrong password
+                            # Continue with normal error handling
+                        
                         # Failed authentication - clear fields and try again
                         dialog.username_input.clear()
                         dialog.password_input.clear()
@@ -1607,8 +1614,10 @@ class NetCafeClient:
                         
                         if is_admin:
                             logger.info(f"🔑 Admin login detected: {username}")
-                            await self._admin_shutdown()
-                            return True
+                            # Start shutdown process but don't wait for it
+                            asyncio.create_task(self._admin_shutdown())
+                            # Return False so login process stops but doesn't continue
+                            return False
                         
                         # Нормален потребител
                         self.session_id = data.get('session_id')
