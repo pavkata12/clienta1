@@ -1541,8 +1541,11 @@ class NetCafeClient:
                     # Try authentication
                     auth_result = await self.authenticate(username, password)
                     if auth_result:
-                        # Success - break the loop
-                        break
+                        # Check if it was admin login (client will be shutting down)
+                        # If admin logged in, _admin_shutdown was called and app is closing
+                        # Don't continue the login loop
+                        logger.info("🔑 Authentication successful - exiting login loop")
+                        return  # Exit the method completely
                     else:
                         # Failed authentication - clear fields and try again
                         dialog.username_input.clear()
@@ -1695,9 +1698,22 @@ class NetCafeClient:
             # Дай още малко време за финално почистване
             await asyncio.sleep(0.2)
             
-            # Изключи приложението
+            # Изключи приложението решително
             logger.info("👋 Shutting down application...")
-            QTimer.singleShot(100, self.app.quit)
+            
+            # Спри всички timers и операции
+            try:
+                self.session_timer.stop()
+                self.reconnect_timer.stop()
+            except:
+                pass
+            
+            # Force quit приложението
+            self.app.quit()
+            
+            # Ако все още не се е изключило, използвай системно изключване
+            import sys
+            sys.exit(0)
             
         except Exception as e:
             logger.error(f"Admin shutdown error: {e}")
@@ -1708,8 +1724,20 @@ class NetCafeClient:
                 await asyncio.sleep(0.5)
             except:
                 pass
-            # Force quit
-            self.app.quit()
+            
+            # Force quit по всички възможни начини
+            try:
+                self.app.quit()
+            except:
+                pass
+            
+            # Последна опция - системно изключване
+            import sys
+            try:
+                sys.exit(0)
+            except:
+                import os
+                os._exit(0)
 
     async def start_session(self, minutes):
         try:
