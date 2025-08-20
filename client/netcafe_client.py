@@ -816,18 +816,37 @@ class KeyboardBlocker:
             logger.error(f"Registry method failed: {e}")
 
     def uninstall(self):
+        logger.info("🔧 Uninstalling keyboard blocker...")
+        
+        # Disable first to stop processing
+        self.enabled = False
+        
         # Stop aggressive monitoring
         if self.block_timer:
-            self.block_timer.stop()
-            self.block_timer = None
+            try:
+                self.block_timer.stop()
+                self.block_timer = None
+                logger.info("✅ Stopped aggressive monitoring")
+            except Exception as e:
+                logger.error(f"Error stopping monitoring: {e}")
             
         # Restore registry if we modified it
-        self._restore_registry()
+        try:
+            self._restore_registry()
+            logger.info("✅ Registry restored")
+        except Exception as e:
+            logger.error(f"Registry restore error: {e}")
         
+        # Remove Windows hook
         if self.hooked:
             try:
-                self.enabled = False
-                ctypes.windll.user32.UnhookWindowsHookEx(self.hooked)
+                logger.info("🔧 Removing Windows keyboard hook...")
+                result = ctypes.windll.user32.UnhookWindowsHookEx(self.hooked)
+                if result:
+                    logger.info("✅ Windows keyboard hook removed successfully")
+                else:
+                    logger.warning("⚠️ UnhookWindowsHookEx returned False")
+                
                 self.hooked = None
                 self.pointer = None
                 
@@ -835,11 +854,23 @@ class KeyboardBlocker:
                 if self.thread and self.thread.is_alive():
                     self.thread.join(timeout=1)
                     
+                # Give Windows time to process the unhook
+                import time
+                time.sleep(0.1)
+                
                 logger.info("🔐 Keyboard blocker uninstalled successfully")
             except Exception as e:
-                logger.error(f"Failed to uninstall keyboard blocker: {e}")
+                logger.error(f"❌ Failed to uninstall keyboard blocker: {e}")
+                # Try force cleanup
+                try:
+                    self.hooked = None
+                    self.pointer = None
+                except:
+                    pass
+        else:
+            logger.info("ℹ️ No keyboard hook to remove")
         
-        self.enabled = False
+        logger.info("✅ Keyboard blocker cleanup completed")
     
     def _restore_registry(self):
         """Restore registry settings"""
@@ -1293,10 +1324,30 @@ class NetCafeClient:
     
     def _cleanup(self):
         try:
+            logger.info("🧹 Starting cleanup process...")
+            
+            # Stop timers first
             self.session_timer.stop()
             self.reconnect_timer.stop()
-            self.keyboard_blocker.uninstall()
-            self.folder_blocker.uninstall()
+            
+            # CRITICAL: Ensure keyboard blocker is fully removed
+            logger.info("🔧 Force removing keyboard protection...")
+            try:
+                self.keyboard_blocker.uninstall()
+                # Give extra time for Windows to process the unhook
+                import time
+                time.sleep(0.3)
+                logger.info("✅ Keyboard protection removed")
+            except Exception as e:
+                logger.error(f"❌ Keyboard blocker cleanup error: {e}")
+            
+            # Remove folder blocker
+            logger.info("🔧 Removing folder protection...")
+            try:
+                self.folder_blocker.uninstall()
+                logger.info("✅ Folder protection removed")
+            except Exception as e:
+                logger.error(f"❌ Folder blocker cleanup error: {e}")
             
             # Enhanced async resource cleanup
             try:
@@ -1321,10 +1372,22 @@ class NetCafeClient:
             except Exception as e:
                 logger.debug(f"Async cleanup handled: {e}")
             
-            self.tray.hide()
-            logger.info("Cleanup completed")
+            # Hide system tray
+            try:
+                self.tray.hide()
+            except Exception as e:
+                logger.debug(f"Tray hide error: {e}")
+            
+            logger.info("✅ Cleanup completed successfully")
         except Exception as e:
-            logger.error(f"Cleanup error: {e}")
+            logger.error(f"❌ Cleanup error: {e}")
+            # Even if cleanup fails, try to force remove keyboard blocker
+            try:
+                self.keyboard_blocker.uninstall()
+                import time
+                time.sleep(0.2)
+            except:
+                pass
     
     async def connect_to_server(self):
         if self.reconnect_attempts >= self.max_reconnect_attempts:
@@ -1537,9 +1600,9 @@ class NetCafeClient:
                     data = await response.json()
                     if data.get('success'):
                         # Проверка дали е админ
-                        user_role = data.get('user', {}).get('role')
+                        is_admin = data.get('user', {}).get('is_admin')
                         
-                        if user_role == 'admin':
+                        if is_admin:
                             logger.info(f"🔑 Admin login detected: {username}")
                             await self._admin_shutdown()
                             return True
@@ -1587,9 +1650,15 @@ class NetCafeClient:
         try:
             logger.info("🔑 Admin login detected - shutting down client")
             
-            # Премахни всички защити
+            # ПЪРВО: Премахни всички защити и изчакай да се приложат
+            logger.info("🔧 Removing keyboard protection...")
             self.keyboard_blocker.uninstall()
+            
+            logger.info("🔧 Removing folder protection...")
             self.folder_blocker.uninstall()
+            
+            # Дай време за почистване на hook-овете
+            await asyncio.sleep(0.5)
             
             # Скрий прозорци
             self.lock_screen.hide()
@@ -1598,7 +1667,7 @@ class NetCafeClient:
             # Покажи съобщение
             msg = QMessageBox()
             msg.setWindowTitle('🔑 Admin Access')
-            msg.setText('Administrator login detected.\nClient shutting down...')
+            msg.setText('Administrator login detected.\nAll protections removed.\nClient shutting down...')
             msg.setIcon(QMessageBox.Information)
             msg.setStandardButtons(QMessageBox.Ok)
             msg.setStyleSheet('''
@@ -1615,19 +1684,31 @@ class NetCafeClient:
                 }
             ''')
             
-            # Показва съобщението за 2 секунди
-            QTimer.singleShot(2000, msg.accept)
+            # Показва съобщението за 3 секунди (повече време за cleanup)
+            QTimer.singleShot(3000, msg.accept)
             msg.exec()
             
-            # Cleanup и изключване
+            # Допълнително почистване
+            logger.info("🧹 Final cleanup...")
             self._cleanup()
             
+            # Дай още малко време за финално почистване
+            await asyncio.sleep(0.2)
+            
             # Изключи приложението
+            logger.info("👋 Shutting down application...")
             QTimer.singleShot(100, self.app.quit)
             
         except Exception as e:
             logger.error(f"Admin shutdown error: {e}")
-            # Force quit дори при грешка
+            # Force cleanup дори при грешка
+            try:
+                self.keyboard_blocker.uninstall()
+                self.folder_blocker.uninstall()
+                await asyncio.sleep(0.5)
+            except:
+                pass
+            # Force quit
             self.app.quit()
 
     async def start_session(self, minutes):
