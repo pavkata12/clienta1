@@ -1658,7 +1658,25 @@ class NetCafeClient:
         try:
             logger.info("🔑 Admin login detected - shutting down client")
             
-            # ПЪРВО: Премахни всички защити и изчакай да се приложат
+            # ПЪРВО: Затвори admin session ако има такава
+            if self.session_id:
+                try:
+                    logger.info("🔄 Closing admin session...")
+                    logout_data = {
+                        'session_id': self.session_id,
+                        'minutes_used': 0  # Admin session не използва minutes
+                    }
+                    
+                    server_url = self._get_current_server_url()
+                    async with self.session.post(f'{server_url}/api/logout', json=logout_data) as response:
+                        if response.status == 200:
+                            logger.info("✅ Admin session closed successfully")
+                        else:
+                            logger.warning(f"⚠️ Admin session close failed: {response.status}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to close admin session: {e}")
+            
+            # Премахни всички защити и изчакай да се приложат
             logger.info("🔧 Removing keyboard protection...")
             self.keyboard_blocker.uninstall()
             
@@ -1675,7 +1693,7 @@ class NetCafeClient:
             # Покажи съобщение
             msg = QMessageBox()
             msg.setWindowTitle('🔑 Admin Access')
-            msg.setText('Administrator login detected.\nAll protections removed.\nClient shutting down...')
+            msg.setText('Administrator login detected.\nSession closed and protections removed.\nClient shutting down...')
             msg.setIcon(QMessageBox.Information)
             msg.setStandardButtons(QMessageBox.Ok)
             msg.setStyleSheet('''
