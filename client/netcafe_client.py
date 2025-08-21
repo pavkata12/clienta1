@@ -3,6 +3,7 @@ import os
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 import socket
 import uuid
@@ -1118,6 +1119,7 @@ class NetCafeClient:
         self.remaining_time = 0
         self.session_id = None
         self.computer_id = self._get_computer_id()
+        self.session_start_time = None  # Track when session actually started
         
         # Server configuration
         self.server_hosts = [self.config['server']['host']] + self.config['server'].get('fallback_hosts', [])
@@ -1673,8 +1675,14 @@ class NetCafeClient:
                             logger.info("✅ Admin session closed successfully")
                         else:
                             logger.warning(f"⚠️ Admin session close failed: {response.status}")
+                    
+                    # Изчакай малко за да се обработи logout-ът напълно
+                    await asyncio.sleep(0.3)
+                    
                 except Exception as e:
                     logger.error(f"❌ Failed to close admin session: {e}")
+                    # Дори при грешка, изчакай малко
+                    await asyncio.sleep(0.1)
             
             # Премахни всички защити и изчакай да се приложат
             logger.info("🔧 Removing keyboard protection...")
@@ -1769,6 +1777,7 @@ class NetCafeClient:
             self.session_active = True
             self.remaining_time = minutes * 60
             self.initial_session_minutes = minutes  # Track initial minutes for proper calculation
+            self.session_start_time = time.time()  # Track actual start time
             self.session_timer.start(1000)
             self._notified_5min = False
             self._notified_1min = False
@@ -1799,13 +1808,27 @@ class NetCafeClient:
             logger.info("Ending session")
             
             if self.session_id:
-                # Fix: Calculate minutes used correctly
-                # Total session time - remaining time = used time
-                total_minutes = getattr(self, 'initial_session_minutes', 0)
-                remaining_minutes = (self.remaining_time // 60) if self.remaining_time else 0
-                minutes_used = max(0, total_minutes - remaining_minutes)
+                # Calculate minutes used based on actual elapsed time
+                if self.session_start_time:
+                    # Method 1: Use actual elapsed time (more accurate)
+                    elapsed_seconds = time.time() - self.session_start_time
+                    minutes_used = max(0, min(self.initial_session_minutes, int(elapsed_seconds / 60)))
+                    
+                    logger.info(f"Session ending (elapsed time method): Elapsed={elapsed_seconds:.1f}s, Used={minutes_used} min")
+                else:
+                    # Method 2: Fallback to remaining time calculation
+                    total_minutes = getattr(self, 'initial_session_minutes', 0)
+                    remaining_minutes = (self.remaining_time // 60) if self.remaining_time else 0
+                    minutes_used = max(0, total_minutes - remaining_minutes)
+                    
+                    logger.info(f"Session ending (remaining time method): Total={total_minutes}, Remaining={remaining_minutes}, Used={minutes_used}")
                 
-                logger.info(f"Session ending: Total={total_minutes}, Remaining={remaining_minutes}, Used={minutes_used}")
+                # Round up partial minutes (if user used 0.5 minutes, charge 1 minute)
+                if self.session_start_time:
+                    elapsed_seconds = time.time() - self.session_start_time
+                    if elapsed_seconds > 0:
+                        minutes_used = max(1, int((elapsed_seconds + 59) / 60))  # Round up to next minute
+                        logger.info(f"Final minutes used (rounded up): {minutes_used}")
                 
                 logout_data = {
                     'session_id': self.session_id,
@@ -1838,6 +1861,7 @@ class NetCafeClient:
             self.session_id = None
             self.remaining_time = 0
             self.initial_session_minutes = 0
+            self.session_start_time = None
             self._notified_5min = False
             self._notified_1min = False
             
