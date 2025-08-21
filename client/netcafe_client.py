@@ -1120,6 +1120,7 @@ class NetCafeClient:
         self.session_id = None
         self.computer_id = self._get_computer_id()
         self.session_start_time = None  # Track when session actually started
+        self.initial_session_minutes = 0  # Track initial minutes for proper calculation
         
         # Server configuration
         self.server_hosts = [self.config['server']['host']] + self.config['server'].get('fallback_hosts', [])
@@ -1808,27 +1809,46 @@ class NetCafeClient:
             logger.info("Ending session")
             
             if self.session_id:
+                logger.info(f"[CLIENT END] Starting session end calculation:")
+                logger.info(f"   session_start_time: {self.session_start_time}")
+                logger.info(f"   initial_session_minutes: {self.initial_session_minutes}")
+                logger.info(f"   remaining_time: {self.remaining_time} seconds")
+                
                 # Calculate minutes used based on actual elapsed time
                 if self.session_start_time:
                     # Method 1: Use actual elapsed time (more accurate)
                     elapsed_seconds = time.time() - self.session_start_time
-                    minutes_used = max(0, min(self.initial_session_minutes, int(elapsed_seconds / 60)))
+                    minutes_used_raw = elapsed_seconds / 60
+                    minutes_used = max(0, min(self.initial_session_minutes, int(minutes_used_raw)))
                     
-                    logger.info(f"Session ending (elapsed time method): Elapsed={elapsed_seconds:.1f}s, Used={minutes_used} min")
+                    logger.info(f"[CLIENT END] Elapsed time method:")
+                    logger.info(f"   Elapsed seconds: {elapsed_seconds:.1f}")
+                    logger.info(f"   Minutes used (raw): {minutes_used_raw:.2f}")
+                    logger.info(f"   Minutes used (int): {minutes_used}")
                 else:
                     # Method 2: Fallback to remaining time calculation
                     total_minutes = getattr(self, 'initial_session_minutes', 0)
                     remaining_minutes = (self.remaining_time // 60) if self.remaining_time else 0
                     minutes_used = max(0, total_minutes - remaining_minutes)
                     
-                    logger.info(f"Session ending (remaining time method): Total={total_minutes}, Remaining={remaining_minutes}, Used={minutes_used}")
+                    logger.info(f"[CLIENT END] Remaining time method:")
+                    logger.info(f"   Total minutes: {total_minutes}")
+                    logger.info(f"   Remaining minutes: {remaining_minutes}")
+                    logger.info(f"   Minutes used: {minutes_used}")
                 
                 # Round up partial minutes (if user used 0.5 minutes, charge 1 minute)
                 if self.session_start_time:
                     elapsed_seconds = time.time() - self.session_start_time
                     if elapsed_seconds > 0:
                         minutes_used = max(1, int((elapsed_seconds + 59) / 60))  # Round up to next minute
-                        logger.info(f"Final minutes used (rounded up): {minutes_used}")
+                        logger.info(f"[CLIENT END] Final minutes used (rounded up): {minutes_used}")
+                    else:
+                        logger.warning(f"[CLIENT END] Elapsed seconds <= 0: {elapsed_seconds}")
+                        minutes_used = 1  # Minimum 1 minute charge
+                else:
+                    logger.warning(f"[CLIENT END] No session_start_time - using fallback method result: {minutes_used}")
+                
+                logger.info(f"[CLIENT END] FINAL RESULT: minutes_used = {minutes_used}")
                 
                 logout_data = {
                     'session_id': self.session_id,
