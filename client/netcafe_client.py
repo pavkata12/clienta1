@@ -719,13 +719,13 @@ class KeyboardBlocker:
             # Method 2: Start aggressive monitoring
             self._start_aggressive_monitoring()
             
-            # Method 3: Block via registry (temporary)
-            self._block_via_registry()
+            # Method 3: Block via registry (REMOVED - causes permanent blocking)
+            # self._block_via_registry()  # DISABLED: Requires system restart to remove
             
             logger.info("🚀 NUCLEAR BLOCKING ACTIVATED:")
             logger.info("   - Explorer Task View disabled")
             logger.info("   - Aggressive process monitoring")
-            logger.info("   - Registry-based blocking")
+            logger.info("   - Registry blocking DISABLED (prevents permanent locks)")
             
         except Exception as e:
             logger.error(f"Nuclear blocking failed: {e}")
@@ -873,7 +873,7 @@ class KeyboardBlocker:
         logger.info("✅ Keyboard blocker cleanup completed")
     
     def _restore_registry(self):
-        """Restore registry settings"""
+        """Restore registry settings and warn about restart requirement"""
         try:
             import winreg
             key_path = r"SYSTEM\CurrentControlSet\Control\Keyboard Layout"
@@ -882,14 +882,19 @@ class KeyboardBlocker:
                 key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_ALL_ACCESS)
                 winreg.DeleteValue(key, "Scancode Map")
                 winreg.CloseKey(key)
-                logger.info("🔧 Restored registry settings")
+                logger.info("🔧 Registry Scancode Map removed")
+                logger.warning("⚠️ SYSTEM RESTART REQUIRED to restore Windows key functionality")
+                logger.warning("⚠️ If Windows key remains blocked, restart your computer")
             except FileNotFoundError:
-                pass  # Value didn't exist
+                logger.info("ℹ️ No registry modifications found to restore")
             except Exception as e:
                 logger.warning(f"Failed to restore registry: {e}")
+                logger.warning("⚠️ Windows key may remain blocked until system restart")
                 
         except Exception as e:
             logger.error(f"Registry restore failed: {e}")
+            logger.error("⚠️ CRITICAL: Windows key may remain permanently blocked!")
+            logger.error("⚠️ Manual fix: Delete HKLM\\SYSTEM\\CurrentControlSet\\Control\\Keyboard Layout\\Scancode Map")
 
 class FolderBlocker:
     """Blocks access to file manager and folders during gaming sessions"""
@@ -1541,19 +1546,12 @@ class NetCafeClient:
                     # Try authentication
                     auth_result = await self.authenticate(username, password)
                     if auth_result:
-                        # Normal user login successful - start session and exit
-                        logger.info("✅ Normal user authentication successful - exiting login loop")
+                        # Check if it was admin login (client will be shutting down)
+                        # If admin logged in, _admin_shutdown was called and app is closing
+                        # Don't continue the login loop
+                        logger.info("🔑 Authentication successful - exiting login loop")
                         return  # Exit the method completely
                     else:
-                        # Check if admin credentials were entered (even if auth_result is False)
-                        # This handles the case where admin login triggers shutdown
-                        if username.lower() in ['admin', 'administrator']:
-                            logger.info("🔑 Admin credentials detected - waiting for shutdown...")
-                            # Give time for admin shutdown to complete
-                            await asyncio.sleep(1.0)
-                            # If we're still here, it means shutdown didn't work or wrong password
-                            # Continue with normal error handling
-                        
                         # Failed authentication - clear fields and try again
                         dialog.username_input.clear()
                         dialog.password_input.clear()
@@ -1614,10 +1612,8 @@ class NetCafeClient:
                         
                         if is_admin:
                             logger.info(f"🔑 Admin login detected: {username}")
-                            # Start shutdown process but don't wait for it
-                            asyncio.create_task(self._admin_shutdown())
-                            # Return False so login process stops but doesn't continue
-                            return False
+                            await self._admin_shutdown()
+                            return True
                         
                         # Нормален потребител
                         self.session_id = data.get('session_id')
