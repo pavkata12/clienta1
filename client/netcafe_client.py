@@ -1662,7 +1662,7 @@ class NetCafeClient:
             logger.info("🔑 Admin login detected - shutting down client")
             
             # ПЪРВО: Затвори admin session ако има такава
-            if self.session_id:
+            if self.session_id and not self.session_id.startswith('admin_'):
                 try:
                     logger.info("🔄 Closing admin session...")
                     logout_data = {
@@ -1684,6 +1684,8 @@ class NetCafeClient:
                     logger.error(f"❌ Failed to close admin session: {e}")
                     # Дори при грешка, изчакай малко
                     await asyncio.sleep(0.1)
+            elif self.session_id and self.session_id.startswith('admin_'):
+                logger.info("🔑 Admin session - no logout needed (no database session created)")
             
             # Премахни всички защити и изчакай да се приложат
             logger.info("🔧 Removing keyboard protection...")
