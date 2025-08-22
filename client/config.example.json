@@ -1,0 +1,14 @@
+{
+    "server": {
+        "host": "192.168.1.100",
+        "port": 8080,
+        "websocket_endpoint": "/ws",
+        "max_reconnect_attempts": 10,
+        "fallback_hosts": ["127.0.0.1"]
+    },
+    "session": {
+        "cleanup_processes": true,
+        "cleanup_timeout": 3
+    }
+}
+

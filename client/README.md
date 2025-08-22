@@ -36,6 +36,7 @@
 - **🚫 Task Manager BLOCKED** - Prevents process termination
 - **📁 File Access BLOCKED** - No access to folders/system tools
 - **⏰ Session Timer** - Automatic logout when time expires
+- **🧹 Process Cleanup** - Automatically closes apps opened during session
 
 ### 🔒 Lock Screen Protection:
 - **🛡️ All Keys BLOCKED** - Alt+F4, Escape, Windows key, etc.
@@ -61,9 +62,17 @@ Edit `config.json`:
         "websocket_endpoint": "/ws",
         "max_reconnect_attempts": 10,
         "fallback_hosts": ["127.0.0.1"]
+    },
+    "session": {
+        "cleanup_processes": true,
+        "cleanup_timeout": 3
     }
 }
 ```
+
+### 🧹 Session Cleanup Options:
+- **`cleanup_processes`** - Automatically close applications opened during session (default: `true`)
+- **`cleanup_timeout`** - Seconds to wait before force-killing unresponsive apps (default: `3`)
 
 ## ⚠️ Requirements:
 - **Windows 10/11** (64-bit)

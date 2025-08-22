@@ -1122,6 +1122,10 @@ class NetCafeClient:
         self.session_start_time = None  # Track when session actually started
         self.initial_session_minutes = 0  # Track initial minutes for proper calculation
         
+        # Process tracking for cleanup
+        self.session_processes = set()  # Track processes started during session
+        self.initial_processes = set()  # Processes that existed before session
+        
         # Server configuration
         self.server_hosts = [self.config['server']['host']] + self.config['server'].get('fallback_hosts', [])
         self.server_port = self.config['server']['port']
@@ -1179,6 +1183,10 @@ class NetCafeClient:
                     "websocket_endpoint": "/ws",
                     "max_reconnect_attempts": 10,
                     "fallback_hosts": ["127.0.0.1"]
+                },
+                "session": {
+                    "cleanup_processes": True,  # Close applications opened during session
+                    "cleanup_timeout": 3       # Seconds to wait before force kill
                 }
             }
     
@@ -1777,6 +1785,9 @@ class NetCafeClient:
         try:
             logger.info(f"Starting session: {minutes} minutes")
             
+            # Capture initial processes before session starts
+            self._capture_initial_processes()
+            
             self.session_active = True
             self.remaining_time = minutes * 60
             self.initial_session_minutes = minutes  # Track initial minutes for proper calculation
@@ -1805,6 +1816,100 @@ class NetCafeClient:
             
         except Exception as e:
             logger.error(f"Start session error: {e}")
+    
+    def _capture_initial_processes(self):
+        """Capture list of processes before session starts"""
+        try:
+            import psutil
+            self.initial_processes = set()
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    self.initial_processes.add(proc.info['pid'])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            logger.info(f"Captured {len(self.initial_processes)} initial processes")
+        except Exception as e:
+            logger.error(f"Error capturing initial processes: {e}")
+    
+    def _cleanup_session_processes(self):
+        """Close all processes that were started during the session"""
+        # Check if process cleanup is enabled in config
+        if not self.config.get('session', {}).get('cleanup_processes', True):
+            logger.info("Process cleanup is disabled in configuration")
+            return
+            
+        try:
+            import psutil
+            current_processes = set()
+            for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                try:
+                    current_processes.add(proc.info['pid'])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            # Find processes that started during session
+            new_processes = current_processes - self.initial_processes
+            
+            # Exclude system and important processes
+            excluded_processes = {
+                'netcafe_client.py', 'python.exe', 'pythonw.exe',
+                'explorer.exe', 'dwm.exe', 'winlogon.exe', 'csrss.exe',
+                'smss.exe', 'wininit.exe', 'services.exe', 'lsass.exe',
+                'svchost.exe', 'taskhost.exe', 'taskmgr.exe'
+            }
+            
+            closed_count = 0
+            for pid in new_processes:
+                try:
+                    proc = psutil.Process(pid)
+                    proc_name = proc.name().lower()
+                    proc_exe = proc.exe() if proc.exe() else ""
+                    
+                    # Skip if it's an excluded process
+                    if any(excluded in proc_name for excluded in excluded_processes):
+                        continue
+                    
+                    # Skip if it's a system process or in system directories
+                    if proc_exe and ('windows\\system32' in proc_exe.lower() or 
+                                   'windows\\syswow64' in proc_exe.lower()):
+                        continue
+                    
+                    # Try to terminate the process gracefully first
+                    logger.info(f"Closing process: {proc_name} (PID: {pid})")
+                    proc.terminate()
+                    
+                    # Wait a bit for graceful termination
+                    timeout = self.config.get('session', {}).get('cleanup_timeout', 3)
+                    try:
+                        proc.wait(timeout=timeout)
+                    except psutil.TimeoutExpired:
+                        # Force kill if it doesn't terminate gracefully
+                        logger.warning(f"Force killing process: {proc_name} (PID: {pid})")
+                        proc.kill()
+                    
+                    closed_count += 1
+                    
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    # Process already terminated or no access
+                    continue
+                except Exception as e:
+                    logger.error(f"Error closing process {pid}: {e}")
+            
+            if closed_count > 0:
+                logger.info(f"Closed {closed_count} session processes")
+                
+                # Show notification to user
+                self.tray.showMessage(
+                    '🧹 Session Cleanup',
+                    f'Closed {closed_count} applications that were opened during your session.',
+                    QSystemTrayIcon.Information,
+                    3000
+                )
+            else:
+                logger.info("No session processes to close")
+                
+        except Exception as e:
+            logger.error(f"Error during process cleanup: {e}")
     
     async def _end_session(self):
         try:
@@ -1876,6 +1981,10 @@ class NetCafeClient:
             self.keyboard_blocker.uninstall()
             self.folder_blocker.uninstall()
             
+            # Clean up processes that were opened during session
+            logger.info("Cleaning up session processes...")
+            self._cleanup_session_processes()
+            
             # DON'T cancel WebSocket - we need it for future logins and force_logout messages
             # Keep WebSocket alive for admin communication
             
@@ -1886,6 +1995,10 @@ class NetCafeClient:
             self.session_start_time = None
             self._notified_5min = False
             self._notified_1min = False
+            
+            # Clear process tracking
+            self.session_processes.clear()
+            self.initial_processes.clear()
             
             self._show_lock_screen()  # This will install strict lock-mode keyboard blocker
             

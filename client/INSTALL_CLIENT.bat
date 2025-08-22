@@ -82,6 +82,10 @@ if exist config.json (
     echo         "websocket_endpoint": "/ws", >> config.json
     echo         "max_reconnect_attempts": 10, >> config.json
     echo         "fallback_hosts": ["127.0.0.1"] >> config.json
+    echo     }, >> config.json
+    echo     "session": { >> config.json
+    echo         "cleanup_processes": true, >> config.json
+    echo         "cleanup_timeout": 3 >> config.json
     echo     } >> config.json
     echo } >> config.json
     
